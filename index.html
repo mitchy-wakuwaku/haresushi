@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>晴れ時々、寿司</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body {
+    margin: 0;
+    background: #87ceeb;
+    text-align: center;
+    font-family: sans-serif;
+    user-select: none;
+  }
+  canvas {
+    background: #cceeff;
+    display: block;
+    margin: 0 auto;
+  }
+  .controls {
+    display: flex;
+    justify-content: space-between;
+    max-width: 400px;
+    margin: 8px auto;
+  }
+  .btn {
+    width: 45%;
+    height: 60px;
+    font-size: 26px;
+    border-radius: 14px;
+    border: 2px solid #333;
+    background: #ffffffcc;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="game" width="400" height="600"></canvas>
+
+<div class="controls">
+  <button class="btn" id="leftBtn">←</button>
+  <button class="btn" id="rightBtn">→</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+// =====================
+// プレイヤー
+// =====================
+const player = {
+  x: 184,
+  y: 520,
+  w: 32,
+  h: 32,
+  speed: 5
+};
+
+// =====================
+// 寿司画像
+// =====================
+const sushiImages = [
+  "いくらのお寿司.png",
+  "うにのお寿司.png",
+  "えびのお寿司.png",
+  "たまごのお寿司.png",
+  "まぐろのお寿司.png"
+].map(src => {
+  const img = new Image();
+  img.src = src;
+  return img;
+});
+
+// =====================
+// ゲーム状態
+// =====================
+let sushis = [];
+let shadows = [];
+let gameOver = false;
+let startTime = Date.now();
+let endTime = null;
+
+// 難易度
+let spawnRate = 0.02;
+let baseSpeed = 2;
+
+// ベスト記録
+let best = Number(localStorage.getItem("sushiBest") || 0);
+
+// =====================
+// 入力
+// =====================
+const input = { left: false, right: false };
+
+// キーボード
+window.addEventListener("keydown", e => {
+  if (["ArrowLeft","ArrowRight","a","d","A","D"].includes(e.key)) {
+    e.preventDefault();
+  }
+  if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") input.left = true;
+  if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") input.right = true;
+  if (gameOver && (e.key === "r" || e.key === "R")) restart();
+});
+
+window.addEventListener("keyup", e => {
+  if (e.key === "ArrowLeft" || e.key === "a" || e.key === "A") input.left = false;
+  if (e.key === "ArrowRight" || e.key === "d" || e.key === "D") input.right = false;
+});
+
+// タッチ・マウス
+const leftBtn = document.getElementById("leftBtn");
+const rightBtn = document.getElementById("rightBtn");
+
+["touchstart","mousedown"].forEach(ev=>{
+  leftBtn.addEventListener(ev,()=>input.left=true);
+  rightBtn.addEventListener(ev,()=>input.right=true);
+});
+["touchend","mouseup","mouseleave"].forEach(ev=>{
+  leftBtn.addEventListener(ev,()=>input.left=false);
+  rightBtn.addEventListener(ev,()=>input.right=false);
+});
+
+// タップでリスタート
+canvas.addEventListener("click", ()=>{ if(gameOver) restart(); });
+
+// =====================
+// 寿司生成（影つき）
+// =====================
+function spawnSushi() {
+  const x = Math.random() * (canvas.width - 32);
+
+  // 影（寿命あり）
+  shadows.push({
+    x: x,
+    y: player.y + 20,
+    life: 30   // 約0.5秒
+  });
+
+  setTimeout(() => {
+    const img = sushiImages[Math.floor(Math.random() * sushiImages.length)];
+    sushis.push({
+      x: x,
+      y: -40,
+      size: 32,
+      speed: baseSpeed + Math.random() * 1.5,
+      rot: Math.random() * Math.PI * 2,
+      rotSpd: (Math.random() - 0.5) * 0.1,
+      img: img
+    });
+  }, 400);
+}
+
+// =====================
+// 当たり判定
+// =====================
+function hit(a, b) {
+  return (
+    a.x < b.x + b.size &&
+    a.x + a.w > b.x &&
+    a.y < b.y + b.size &&
+    a.y + a.h > b.y
+  );
+}
+
+// =====================
+// 更新
+// =====================
+function update() {
+  if (gameOver) return;
+
+  // プレイヤー移動
+  if (input.left) player.x -= player.speed;
+  if (input.right) player.x += player.speed;
+  player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+
+  // 寿司更新
+  sushis.forEach(s => {
+    s.y += s.speed;
+    s.rot += s.rotSpd;
+
+    if (hit(player, s)) {
+      gameOver = true;
+      endTime = Date.now();
+      const score = (endTime - startTime) / 1000;
+      if (score > best) {
+        best = score;
+        localStorage.setItem("sushiBest", best);
+      }
+    }
+  });
+
+  sushis = sushis.filter(s => s.y < canvas.height + 60);
+
+  // 影の更新（寿命減少）
+  shadows.forEach(sh => sh.life--);
+  shadows = shadows.filter(sh => sh.life > 0);
+
+  // 寿司生成
+  if (Math.random() < spawnRate) spawnSushi();
+
+  // 難易度上昇
+  const t = (Date.now() - startTime) / 1000;
+  spawnRate = 0.02 + t * 0.0012;
+  baseSpeed = 2 + t * 0.05;
+}
+
+// =====================
+// 描画
+// =====================
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // 影
+  ctx.fillStyle = "rgba(0,0,0,0.2)";
+  shadows.forEach(sh => {
+    ctx.beginPath();
+    ctx.ellipse(sh.x + 16, sh.y, 16, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // プレイヤー
+  ctx.fillStyle = "#333";
+  ctx.fillRect(player.x, player.y, player.w, player.h);
+
+  // 寿司
+  sushis.forEach(s => {
+    ctx.save();
+    ctx.translate(s.x + 16, s.y + 16);
+    ctx.rotate(s.rot);
+    ctx.drawImage(s.img, -16, -16, 32, 32);
+    ctx.restore();
+  });
+
+  const time = gameOver
+    ? ((endTime - startTime) / 1000).toFixed(2)
+    : ((Date.now() - startTime) / 1000).toFixed(2);
+
+  ctx.fillStyle = "#000";
+  ctx.fillText(`TIME ${time}s`, 10, 20);
+  ctx.fillText(`BEST ${best.toFixed(2)}s`, 10, 38);
+
+  if (gameOver) {
+    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#fff";
+    ctx.font = "22px sans-serif";
+    ctx.fillText("GAME OVER", 120, 270);
+    ctx.fillText(`${time} 秒`, 150, 305);
+    ctx.font = "14px sans-serif";
+    ctx.fillText("Rキー or タップで再挑戦", 110, 340);
+  }
+}
+
+// =====================
+// リスタート
+// =====================
+function restart() {
+  sushis = [];
+  shadows = [];
+  gameOver = false;
+  startTime = Date.now();
+  endTime = null;
+  spawnRate = 0.02;
+  baseSpeed = 2;
+}
+
+// =====================
+// ループ
+// =====================
+setInterval(() => {
+  update();
+  draw();
+}, 1000 / 60);
+</script>
+
+</body>
+</html>
